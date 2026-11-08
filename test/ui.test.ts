@@ -167,7 +167,7 @@ describe('responses', () => {
       // Literal values, so removing a header or directive from SECURITY_HEADERS fails here too.
       expect(r.headers['x-content-type-options']).toBe('nosniff');
       expect(r.headers['x-frame-options']).toBe('DENY');
-      expect(r.headers['referrer-policy']).toBe('no-referrer');
+      expect(r.headers['referrer-policy']).toBe('same-origin'); // no-referrer breaks form posts (Origin: null)
       expect(r.headers['cache-control']).toBe('no-store');
       expect(r.headers['cross-origin-opener-policy']).toBe('same-origin');
       expect(r.headers['content-security-policy']).toBe("default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
