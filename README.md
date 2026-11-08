@@ -243,7 +243,7 @@ Copyright 2026 MB AFKzona Group.
 
 Tocsin is licensed under the [GNU AGPL v3 only](LICENSE) with one additional term under section 7(b) ([LICENSE-ADDITIONAL-TERMS.md](LICENSE-ADDITIONAL-TERMS.md)): the attribution "Tocsin by AFKzona Group" stays in the web interface and in the report templates. "Tocsin" is a trademark; forks must use another name ([TRADEMARKS.md](TRADEMARKS.md)).
 
-**Enterprise.** AFKzona Group offers a commercial licence without AGPL obligations, white-label reports, warranty and indemnity options, priority support, and enterprise services: a hosted dashboard, continuous multi-site monitoring, SSO/SAML, roles, audit evidence packs, a legal-update feed and SLA support. These are not part of this repository. See [COMMERCIAL.md](COMMERCIAL.md) or write to info@afkzonagroup.lt.
+**Enterprise.** MB AFKzona Group offers a commercial licence for organisations that cannot use the AGPL-3.0 terms (including white-label use without the attribution notice, and warranty and indemnity options), integration into your systems, custom connectors and features, and support agreements. See [COMMERCIAL.md](COMMERCIAL.md) or contact info@afkzonagroup.lt.
 
 ## Contributing
 
