@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-check/
+coverage/
+*.log
+.DS_Store
+# Local stores, keys and exports must never be committed.
+*.tocsin
+*.tocsin.lock
+*.tocsin-export
+tocsin.config.json
+.env
+.env.*
+# Local tool and editor state.

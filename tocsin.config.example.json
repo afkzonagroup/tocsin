@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "timeZone": "Europe/Brussels",
+  "entity": {
+    "name": "Example UAB",
+    "category": "important",
+    "memberState": "LT",
+    "contactName": "Security team",
+    "contactEmail": "security@example.com"
+  },
+  "authority": {
+    "role": "csirt",
+    "name": "Your national CSIRT (check your national law)",
+    "channel": "Reporting portal",
+    "url": "https://reporting.example.org",
+    "notes": "Use the national form; attach the Tocsin report."
+  },
+  "turnover": {
+    "financialYear": "2025",
+    "amountCents": 1250000000
+  },
+  "webhooks": [
+    {
+      "id": "security-chat",
+      "kind": "slack",
+      "urlEnv": "TOCSIN_SLACK_WEBHOOK_URL",
+      "events": ["deadline-due-soon", "deadline-overdue"],
+      "dueSoonHours": 6
+    },
+    {
+      "id": "soc",
+      "kind": "generic",
+      "urlEnv": "TOCSIN_SOC_WEBHOOK_URL",
+      "secretEnv": "TOCSIN_SOC_WEBHOOK_SECRET",
+      "events": ["deadline-overdue", "stage-submitted"]
+    }
+  ]
+}

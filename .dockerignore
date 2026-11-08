@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-check
+coverage
+.git
+.github
+test
+*.tocsin
+*.tocsin.lock
+*.tocsin-export
+tocsin.config.json
+.env
+.env.*

@@ -1,0 +1,78 @@
+{
+  "name": "@afkzona/tocsin",
+  "version": "0.1.0",
+  "description": "Self-hosted, offline-first NIS2 significant-incident reporting: register, Article 23 deadlines, report content, encrypted local store.",
+  "license": "AGPL-3.0-only",
+  "author": "MB AFKzona Group <info@afkzonagroup.lt>",
+  "homepage": "https://github.com/afkzonagroup/tocsin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/afkzonagroup/tocsin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/afkzonagroup/tocsin/issues"
+  },
+  "keywords": [
+    "nis2",
+    "incident-reporting",
+    "cybersecurity",
+    "csirt",
+    "compliance",
+    "2022/2555",
+    "2024/2690"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "tocsin": "bin/tocsin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "bin/",
+    "dist/",
+    "LICENSE",
+    "LICENSE-ADDITIONAL-TERMS.md",
+    "COMMERCIAL.md",
+    "TRADEMARKS.md",
+    "LEGAL.md",
+    "tocsin.config.example.json",
+    "README.md",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "check": "npm run typecheck && npm run lint && npm run build && npm run test",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "@vitest/coverage-v8": "5.1.0",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
+  }
+}
