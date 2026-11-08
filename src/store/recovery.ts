@@ -7,7 +7,7 @@ import { appendAudit, assertAuditIntact } from '../audit/chain.js';
 import { toIso } from '../time/zone.js';
 import { TocsinError } from '../util/errors.js';
 import { str } from '../util/validate.js';
-import { DEFAULT_SCRYPT, assertPassphrase, constantTimeEqual, type KeySource, type ScryptParams } from './crypto.js';
+import { DEFAULT_SCRYPT, assertPassphrase, type KeySource, type ScryptParams } from './crypto.js';
 import { exists, fsyncDir, readFileCapped, safePath, withLock, writeFileAtomic, writeNewFile } from './fsutil.js';
 import { MAX_STORE_BYTES, STORE_FORMAT, assertSameData, keyFor, newKdf, serialise, verifyStoreBuffer, type Kdf, type StoreData } from './store.js';
 
@@ -73,9 +73,14 @@ async function verifyBeforeWrite(text: string, source: KeySource, expected: Stor
   assertSameData(check.data, expected, 'before writing');
 }
 
+function sameBytes(x: Uint8Array, y: Uint8Array): boolean {
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+/** True when both sources are the same secret. Both are the operator's own input; the length check leaks nothing new. */
 function sameSecret(a: KeySource, b: KeySource): boolean {
-  if (a.kind === 'raw' && b.kind === 'raw') return a.key.length === b.key.length && timingSafeEqual(a.key, b.key);
-  if (a.kind === 'passphrase' && b.kind === 'passphrase') return constantTimeEqual(a.passphrase.normalize('NFC'), b.passphrase.normalize('NFC'));
+  if (a.kind === 'raw' && b.kind === 'raw') return sameBytes(a.key, b.key);
+  if (a.kind === 'passphrase' && b.kind === 'passphrase') return sameBytes(Buffer.from(a.passphrase.normalize('NFC'), 'utf8'), Buffer.from(b.passphrase.normalize('NFC'), 'utf8'));
   return false;
 }
 
