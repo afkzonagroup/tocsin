@@ -130,16 +130,22 @@ export async function withLock<T>(target: string, fn: () => Promise<T>): Promise
   }
   if (fh === undefined) throw new TocsinError('STORE_LOCKED', 'The store is locked by another process.');
   let ours: { dev: number; ino: number } | undefined;
+  // A random token identifies our lock. Inode numbers alone are not enough: Linux file systems reuse the
+  // inode of a deleted file at once, so a replacement lock can carry the same dev/ino as ours.
+  const token = randomBytes(16).toString('hex');
   try {
     ours = await fh.stat();
-    await fh.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    await fh.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token }));
     await fh.close();
     return await fn();
   } finally {
     await fh.close().catch(() => undefined);
-    // Remove the lock only if it is still the file we created.
+    // Remove the lock only if it is still the file we created: same inode and still carrying our token.
     const now = await lstat(lockPath).catch(() => undefined);
-    if (now !== undefined && (ours === undefined || (now.dev === ours.dev && now.ino === ours.ino))) await unlink(lockPath).catch(() => undefined);
+    if (now !== undefined && now.dev === ours?.dev && now.ino === ours.ino) {
+      const content = await readFile(lockPath, 'utf8').catch(() => '');
+      if (content.includes(`"token":"${token}"`)) await unlink(lockPath).catch(() => undefined);
+    }
   }
 }
 
