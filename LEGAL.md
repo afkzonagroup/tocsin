@@ -99,6 +99,26 @@ These are the readings Tocsin uses. Where a reading is uncertain, Tocsin picks t
 8. **Unknown trust-service impact.** For trust service providers, the 24-hour notification deadline applies unless you answer that the incident does not affect the provision of trust services.
 9. **Exceeding a share.** "More than 5 % … or more than 1 million …, whichever number is smaller" is "more than the smaller of the two numbers", computed without rounding.
 
+## How the deadlines are tested
+
+The deadline code (`src/stages/deadlines.ts`, `src/time/`) is checked against a second calculator written separately from the readings above (`test/oracle/deadline-oracle.ts`). It has its own calendar-month and time-zone arithmetic.
+
+`test/deadline-oracle.test.ts` compares the two over 20,000 generated incidents in nine time zones. These include 30-minute daylight-saving changes (Lord Howe), negative daylight-saving time (Dublin), changes at midnight (Santiago) and UTC+12:45 (Chatham).
+
+The awareness times cluster 24 hours, 72 hours and about one month before clock changes, and around month ends and 29 February. The generated incidents cover:
+- submissions on time and late;
+- awareness times corrected after reports were sent;
+- trust service providers with each possible answer;
+- progress reports, handling concluded or not;
+- intermediate requests.
+
+All cases agree. The disagreements found while building the oracle came from impossible generated states, such as a final report submitted before handling concluded, which Tocsin refuses. None was a different reading of the law.
+
+The test fails if:
+- the notification deadline changes by one hour;
+- calendar months are counted in UTC;
+- an unanswered trust-service question stops counting as yes.
+
 ## What is not covered
 
 - National rules: reporting portals, forms, languages, extra fields, sector rules and any national thresholds for entities outside IR 2024/2690.
