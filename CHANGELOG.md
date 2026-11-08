@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
+### Fixed
+
+- Lock files are released only by their owner on file systems that reuse inode numbers (Linux): the lock now carries a random token (#4).
+- Files are checked and read through one handle opened without following symlinks, so they cannot change between check and read (#15).
+
+### Changed
+
+- Dependabot groups minor and patch updates and ignores major versions (#14).
+- Release workflow skips versions already on npm.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

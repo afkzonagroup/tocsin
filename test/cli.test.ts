@@ -48,7 +48,7 @@ describe('argument validation', () => {
     expect((await cli([])).code).toBe(2);
     expect((await cli(['frobnicate'])).code).toBe(2);
     expect((await cli(['help'])).code).toBe(0);
-    expect((await cli(['--version'])).out).toBe('0.1.0\n');
+    expect((await cli(['--version'])).out).toBe('0.1.1\n');
   });
 
   it('unknown options and extra positionals are rejected', async () => {

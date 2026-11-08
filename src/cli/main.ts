@@ -43,7 +43,7 @@ import { oneOf, TRI_VALUES } from '../util/validate.js';
 import { actorFrom, configPath, loadConfig, resolveKey, storePath } from './context.js';
 import { colourEnabled, pad, paint, term, type CliIo } from './io.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 
 const COMMON = {
   store: { type: 'string' },
