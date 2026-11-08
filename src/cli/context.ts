@@ -53,8 +53,8 @@ export interface KeyOptions {
   readonly keyFile?: string | undefined;
   /** Ask twice (new store / new export). */
   readonly confirm?: boolean;
-  /** Environment variable prefix: TOCSIN (store) or TOCSIN_EXPORT (export bundles). */
-  readonly prefix?: 'TOCSIN' | 'TOCSIN_EXPORT';
+  /** Environment variable prefix: TOCSIN (store), TOCSIN_EXPORT (export bundles) or TOCSIN_NEW (new store key for rekey). */
+  readonly prefix?: 'TOCSIN' | 'TOCSIN_EXPORT' | 'TOCSIN_NEW';
   readonly label?: string;
 }
 
@@ -73,7 +73,8 @@ export async function resolveKey(io: CliIo, opts: KeyOptions = {}): Promise<KeyS
     return { kind: 'passphrase', passphrase: envPass };
   }
   if (io.promptSecret === undefined) {
-    throw new TocsinError('CONFIG', `No key: set ${prefix}_KEY or ${prefix}_PASSPHRASE, use --key-file, or run in a terminal.`);
+    const flag = prefix === 'TOCSIN' ? ', use --key-file' : prefix === 'TOCSIN_NEW' ? ', use --new-key-file' : '';
+    throw new TocsinError('CONFIG', `No key: set ${prefix}_KEY or ${prefix}_PASSPHRASE${flag}, or run in a terminal.`);
   }
   const label = opts.label ?? 'Store passphrase';
   const first = await io.promptSecret(`${label}: `);

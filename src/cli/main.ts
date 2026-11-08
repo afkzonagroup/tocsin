@@ -37,6 +37,8 @@ import { computeDeadlines, pendingDeadlines, submissionOf, type Deadline } from 
 import { nextStages } from '../stages/machine.js';
 import { createExportBundle, EncryptedStore, emptyData, readExportBundle, type StoreData } from '../store/store.js';
 import { exists, isGroupOrWorldAccessible, readFileCapped, safePath, writeNewFile } from '../store/fsutil.js';
+import { migrateStore } from '../store/migrate.js';
+import { rekeyStore, restoreStore } from '../store/recovery.js';
 import { formatInZone, parseInstant, toIso, toMs } from '../time/zone.js';
 import { TocsinError, invalid, publicMessage } from '../util/errors.js';
 import { oneOf, TRI_VALUES } from '../util/validate.js';
@@ -87,8 +89,10 @@ Reporting (Article 23(4) NIS2)
 
 Records and data
   audit [--verify]                           Hash-chained audit log
-  export --out FILE                          Encrypted export (key: TOCSIN_EXPORT_KEY / _PASSPHRASE / prompt)
-  import --in FILE                           Restore an export into a new store (--store)
+  export --out FILE                          Encrypted export = backup (key: TOCSIN_EXPORT_KEY / _PASSPHRASE / prompt)
+  import --in FILE [--replace]               Restore an export; --replace keeps the current store as a .bak
+  rekey [--new-key-file FILE]                Re-encrypt the store under a new key (TOCSIN_NEW_KEY / _PASSPHRASE / prompt)
+  migrate                                    Upgrade the store file to the current format version
   import-incidents --format pagerduty|incident-io|misp --in FILE --service TYPE
   notify [--dry-run]                         Send due/overdue webhook messages (configured webhooks only)
   ui [--port 8080] [--host 127.0.0.1]        Local web interface
@@ -737,20 +741,48 @@ const commands: Readonly<Record<string, Handler>> = {
   },
 
   async import(args, io) {
-    const p = parse(args, { in: { type: 'string' } });
+    const p = parse(args, { in: { type: 'string' }, replace: { type: 'boolean' } });
     expectPositionals(p, 0);
     const sess = new Session(io, p);
     const input = safePath(req(p, 'in'), 'input');
     const stPath = storePath(s(p, 'store'), io);
-    if (await exists(stPath)) throw new TocsinError('CONFLICT', 'Import restores into a new store; the target store already exists.');
+    const replace = b(p, 'replace');
+    if (!replace && (await exists(stPath))) {
+      throw new TocsinError('CONFLICT', 'The target store already exists. To replace it, pass --replace; the current file is then kept as a .bak copy.');
+    }
     const bundle = await readFileCapped(input, 64 * 1024 * 1024);
     const exportKey = await resolveKey(io, { prefix: 'TOCSIN_EXPORT', label: 'Export passphrase' });
+    // Every record and the audit chain are verified here, before the store is touched.
     const data: StoreData = await readExportBundle(bundle, exportKey);
     const key = await resolveKey(io, { keyFile: s(p, 'key-file'), confirm: true, label: 'New store passphrase' });
-    const restored = logEvent(data, 'store.imported', sess.ctx(), undefined, `${data.incidents.length} incident(s)`);
-    const store = await EncryptedStore.create(stPath, key, restored);
-    store.close();
-    sess.out(`Restored ${data.incidents.length} incident(s) into ${stPath}; audit chain verified.`);
+    const r = await restoreStore(stPath, key, data, sess.ctx(), { replace });
+    sess.out(`Restored ${r.incidents} incident(s) into ${stPath}; audit chain verified (${r.auditEntries} entries, head ${r.auditHead}).`);
+    if (r.replacedBackup !== undefined) sess.out(`The replaced store was kept as ${r.replacedBackup} (mode 0600).`);
+    return 0;
+  },
+
+  async rekey(args, io) {
+    const p = parse(args, { 'new-key-file': { type: 'string' } });
+    expectPositionals(p, 0);
+    const sess = new Session(io, p);
+    const stPath = storePath(s(p, 'store'), io);
+    const current = await resolveKey(io, { keyFile: s(p, 'key-file'), label: 'Current store passphrase' });
+    const next = await resolveKey(io, { prefix: 'TOCSIN_NEW', keyFile: s(p, 'new-key-file'), confirm: true, label: 'New store passphrase' });
+    const r = await rekeyStore(stPath, current, next, sess.ctx());
+    sess.out(`Re-encrypted ${stPath}: ${r.from} replaced by a new ${r.to}. Audit chain verified (${r.auditEntries} entries, head ${r.auditHead}).`);
+    sess.out('Use the new key from now on (TOCSIN_KEY, TOCSIN_PASSPHRASE or --key-file). Backups and exports made before now still open with their old keys.');
+    return 0;
+  },
+
+  async migrate(args, io) {
+    const p = parse(args, {});
+    expectPositionals(p, 0);
+    const sess = new Session(io, p);
+    const stPath = storePath(s(p, 'store'), io);
+    const key = await resolveKey(io, { keyFile: s(p, 'key-file') });
+    const r = await migrateStore(stPath, key, sess.ctx());
+    if (r.applied.length === 0) sess.out(`The store is already at format version ${r.to}; nothing to do. Audit chain verified (${r.auditEntries} entries).`);
+    else sess.out(`Migrated ${stPath} from format version ${r.from} to ${r.to}. Audit chain verified (${r.auditEntries} entries, head ${r.auditHead}). The original is kept as ${r.backup ?? '?'}.`);
     return 0;
   },
 

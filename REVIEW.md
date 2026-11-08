@@ -115,3 +115,25 @@ Every threshold in `thresholds.ts` and `assess.ts` against Articles 3-14 (strict
 - `npm run check`: typecheck, lint, build and tests pass. 281 tests in 10 files (was 267). Coverage 94.7 % lines overall; core threshold met.
 - `npm audit --omit=dev`: 0 vulnerabilities.
 - Mutation check: every security and legal control in the list above now fails at least one test when removed. Remaining survivors are equivalent or redundant mutations (the KDF binding in the index associated data, because any KDF change already changes the key; the DNS "fewer than 1 000" boundary, decided earlier by the "outside the exception" branch; the temporary-file mode, which is reset by `chmod` before rename; the webhook response cap, documented above).
+
+## Store recovery: rekey, restore and migrations (issue #8)
+
+### What was checked
+
+- Every file-system step of `rekey`, `import --replace` and `migrate`, by crashing the operation there (the call fails and every later call fails too, as for a dead process: no cleanup, lock left behind), plus a half-written variant of every write. 4 rekey directions, restore and migrate; about 30 crash points each.
+- After each crash: for rekey, exactly one of the two secrets opens the store, the store verifies (records, index, audit chain), and the rotation completes when run again; for restore and migrate, the store is the original file byte for byte, or the new store with a complete `.bak` of the original.
+- Durability order: temp file fsynced before the rename, directory fsynced after it; `.bak` copies fsynced and their directory entry made durable before the store is replaced.
+- Mutation check: each new control removed in turn (26 mutations), plus an in-place (non-atomic) write.
+
+### Found and fixed during the work
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | The version check ran after the strict key check, so a newer store with a new field was reported as "invalid structure". | The version is read first; a newer version is refused by name and never rewritten. |
+| 2 | A truncated store gave "The file is not valid JSON." with no next step. | The message says it may be truncated or damaged and points to restoring a backup. |
+| 3 | The no-key message suggested `--key-file` for the export and new-key prompts too. | Each prompt names its own flag. |
+
+### Results
+
+- All 26 mutations of new controls fail at least one test except one equivalent mutation: `import` passing `replace: true` to `restoreStore` is masked by the CLI's own check before any secret is read (the library check is killed separately).
+- An in-place write instead of temp file and rename fails the crash matrix on the invariant itself (neither key opens after a half write).
