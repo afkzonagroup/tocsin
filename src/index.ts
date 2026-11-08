@@ -48,7 +48,9 @@ export { renderReport, renderMarkdown, renderHtml, renderJson, escapeMarkdown, R
 export { escapeHtml } from './util/html.js';
 
 export { appendAudit, verifyAudit, type AuditEntry, type ChainCheck } from './audit/chain.js';
-export { EncryptedStore, createExportBundle, readExportBundle, emptyData, type StoreData, type StoreMeta } from './store/store.js';
+export { EncryptedStore, createExportBundle, readExportBundle, emptyData, FORMAT_VERSION, type StoreData, type StoreMeta, type Kdf as StoreKdf } from './store/store.js';
+export { rekeyStore, restoreStore, type MaintenanceContext, type RekeyOptions, type RekeyResult, type RestoreOptions, type RestoreResult } from './store/recovery.js';
+export { migrateStore, planMigration, STORE_MIGRATIONS, type MigrationStep, type MigrationTools, type MigrationResult } from './store/migrate.js';
 export { parseRawKey, type KeySource } from './store/crypto.js';
 export * as ops from './registry/ops.js';
 

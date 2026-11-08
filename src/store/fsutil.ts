@@ -19,7 +19,8 @@ export function safePath(p: string, what: string): string {
   return resolve(p);
 }
 
-async function fsyncDir(dir: string): Promise<void> {
+/** Fsyncs a directory so that a rename or a new file in it survives a power loss. Best effort: platforms that cannot fsync a directory are ignored. */
+export async function fsyncDir(dir: string): Promise<void> {
   let fh;
   try {
     fh = await open(dir, constants.O_RDONLY);

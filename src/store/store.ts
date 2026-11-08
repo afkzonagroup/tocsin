@@ -60,9 +60,11 @@ export interface StoreData {
   readonly audit: readonly AuditEntry[];
 }
 
-type Kdf = { readonly name: 'scrypt'; readonly salt: string; readonly N: number; readonly r: number; readonly p: number } | { readonly name: 'raw'; readonly salt: string };
+/** @internal Key-derivation header of a file. */
+export type Kdf = { readonly name: 'scrypt'; readonly salt: string; readonly N: number; readonly r: number; readonly p: number } | { readonly name: 'raw'; readonly salt: string };
 
-interface FileV1 {
+/** @internal A parsed file of format version 1. */
+export interface FileV1 {
   readonly format: FileFormat;
   readonly version: 1;
   readonly cipher: 'aes-256-gcm';
@@ -97,31 +99,74 @@ function parseBox(v: unknown, what: string): Box {
   return { n: str(o['n'], `${what}.n`, { max: 32 }), c: str(o['c'], `${what}.c`, { max: MAX_STORE_BYTES }), t: str(o['t'], `${what}.t`, { max: 32 }) };
 }
 
-function parseFile(buf: Buffer, expected: FileFormat): FileV1 {
+/** Highest format version number accepted as a number at all (anything above is refused as corrupt). */
+const MAX_VERSION_NUMBER = 10_000;
+
+function formatLabel(format: FileFormat): string {
+  return format === STORE_FORMAT ? 'store' : 'export';
+}
+
+/** @internal The top-level object of a file and its format version, before the version-specific checks. */
+export interface FileHeader {
+  readonly raw: Readonly<Record<string, unknown>>;
+  readonly version: number;
+}
+
+/**
+ * @internal Parses the JSON of a store or export file and reads its format version. Versions newer than
+ * this release are refused with a message that says so; the caller decides what to do with older ones.
+ */
+export function readHeader(buf: Buffer, expected: FileFormat): FileHeader {
   let raw: unknown;
   try {
     raw = JSON.parse(buf.toString('utf8'));
   } catch {
-    throw new TocsinError('STORE_FORMAT', 'The file is not valid JSON.');
+    throw new TocsinError('STORE_FORMAT', 'The file is not valid JSON. It may be truncated or damaged; restore it from a backup (see "Backup and restore" in the README).');
+  }
+  if (!isRecord(raw)) throw new TocsinError('STORE_FORMAT', 'The file structure is invalid.');
+  if (raw['format'] !== expected) throw new TocsinError('STORE_FORMAT', `Not a ${expected} file.`);
+  const v = raw['version'];
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > MAX_VERSION_NUMBER) throw new TocsinError('STORE_FORMAT', 'The file structure is invalid.');
+  if (v > FORMAT_VERSION) {
+    throw new TocsinError(
+      'STORE_FORMAT',
+      `This ${formatLabel(expected)} file uses format version ${v}, written by a newer Tocsin. This Tocsin reads format version ${FORMAT_VERSION} only. Upgrade Tocsin; do not edit the file.`,
+    );
+  }
+  return { raw, version: v };
+}
+
+/** @internal Validates a key-derivation header (also bounds the scrypt cost before any work). */
+export function parseKdf(v: unknown): Kdf {
+  const k = asRecord(v, 'kdf');
+  if (k['name'] === 'scrypt') {
+    onlyKeys(k, ['name', 'salt', 'N', 'r', 'p'], 'kdf');
+    const kdf: Kdf = { name: 'scrypt', salt: str(k['salt'], 'kdf.salt', { max: 64 }), N: nonNegInt(k['N'], 'kdf.N'), r: nonNegInt(k['r'], 'kdf.r'), p: nonNegInt(k['p'], 'kdf.p') };
+    assertScryptParams(kdf);
+    return kdf;
+  }
+  if (k['name'] === 'raw') {
+    onlyKeys(k, ['name', 'salt'], 'kdf');
+    return { name: 'raw', salt: str(k['salt'], 'kdf.salt', { max: 64 }) };
+  }
+  throw new TocsinError('STORE_FORMAT', 'Unsupported key derivation.');
+}
+
+/** @internal Parses a file of the current format version. Older versions are refused with a pointer to `tocsin migrate`. */
+export function parseFile(buf: Buffer, expected: FileFormat): FileV1 {
+  const { raw: o, version } = readHeader(buf, expected);
+  if (version < FORMAT_VERSION) {
+    throw new TocsinError(
+      'STORE_FORMAT',
+      expected === STORE_FORMAT
+        ? `This store uses format version ${version}. Run "tocsin migrate" to upgrade it to version ${FORMAT_VERSION}; the original file is kept as a .bak copy.`
+        : `This export uses format version ${version}. Import it with the Tocsin release that wrote it, migrate that store, and export again.`,
+    );
   }
   try {
-    const o = asRecord(raw, 'file');
     onlyKeys(o, ['format', 'version', 'cipher', 'kdf', 'index', 'records'], 'file');
-    if (o['format'] !== expected) throw new TocsinError('STORE_FORMAT', `Not a ${expected} file.`);
-    if (o['version'] !== FORMAT_VERSION) throw new TocsinError('STORE_FORMAT', `Unsupported ${expected} version.`);
     if (o['cipher'] !== 'aes-256-gcm') throw new TocsinError('STORE_FORMAT', 'Unsupported cipher.');
-    const k = asRecord(o['kdf'], 'kdf');
-    let kdf: Kdf;
-    if (k['name'] === 'scrypt') {
-      onlyKeys(k, ['name', 'salt', 'N', 'r', 'p'], 'kdf');
-      kdf = { name: 'scrypt', salt: str(k['salt'], 'kdf.salt', { max: 64 }), N: nonNegInt(k['N'], 'kdf.N'), r: nonNegInt(k['r'], 'kdf.r'), p: nonNegInt(k['p'], 'kdf.p') };
-      assertScryptParams(kdf);
-    } else if (k['name'] === 'raw') {
-      onlyKeys(k, ['name', 'salt'], 'kdf');
-      kdf = { name: 'raw', salt: str(k['salt'], 'kdf.salt', { max: 64 }) };
-    } else {
-      throw new TocsinError('STORE_FORMAT', 'Unsupported key derivation.');
-    }
+    const kdf = parseKdf(o['kdf']);
     const recs = asRecord(o['records'], 'records');
     const records: Record<string, Box> = {};
     for (const [id, b] of Object.entries(recs)) {
@@ -169,8 +214,8 @@ function validateMeta(v: unknown): StoreMeta {
   };
 }
 
-/** Decrypts and validates every record of a parsed file. */
-function decryptAll(file: FileV1, key: Buffer): { data: StoreData; revision: number; plain: Map<string, string> } {
+/** @internal Decrypts and validates every record of a parsed file, and verifies the audit chain. */
+export function decryptAll(file: FileV1, key: Buffer): { data: StoreData; revision: number; plain: Map<string, string> } {
   const idx = decodeJson(open(key, file.index, indexAad(file.format, file.kdf)));
   if (!isRecord(idx) || typeof idx['revision'] !== 'number' || !isRecord(idx['records'])) throw new TocsinError('WRONG_KEY_OR_TAMPERED', 'Index is malformed.');
   const index: IndexV1 = { revision: idx['revision'], records: idx['records'] as Record<string, string> };
@@ -212,7 +257,8 @@ function decryptAll(file: FileV1, key: Buffer): { data: StoreData; revision: num
   return { data: { meta, incidents, audit }, revision: index.revision, plain };
 }
 
-function recordsOf(data: StoreData): Map<string, string> {
+/** @internal Canonical plaintext of every record, by record id. */
+export function recordsOf(data: StoreData): Map<string, string> {
   const m = new Map<string, string>();
   m.set('meta:main', canonicalJson({ ...data.meta, notified: data.meta.notified.slice(-MAX_NOTIFIED) }));
   for (const i of data.incidents) m.set(`incident:${i.id}`, canonicalJson(i));
@@ -221,7 +267,8 @@ function recordsOf(data: StoreData): Map<string, string> {
   return m;
 }
 
-function serialise(format: FileFormat, kdf: Kdf, key: Buffer, data: StoreData, revision: number, previous?: { plain: Map<string, string>; boxes: Readonly<Record<string, Box>> }): { text: string; plain: Map<string, string>; boxes: Record<string, Box> } {
+/** @internal Seals data into the text of a current-version file. */
+export function serialise(format: FileFormat, kdf: Kdf, key: Buffer, data: StoreData, revision: number, previous?: { plain: Map<string, string>; boxes: Readonly<Record<string, Box>> }): { text: string; plain: Map<string, string>; boxes: Record<string, Box> } {
   const plain = recordsOf(data);
   const boxes: Record<string, Box> = {};
   const hashes: Record<string, string> = {};
@@ -237,7 +284,8 @@ function serialise(format: FileFormat, kdf: Kdf, key: Buffer, data: StoreData, r
   return { text: `${JSON.stringify(file)}\n`, plain, boxes };
 }
 
-async function keyFor(source: KeySource, kdf: Kdf, format: FileFormat): Promise<Buffer> {
+/** @internal Derives the data key of a file for a key source; refuses a source of the wrong kind. */
+export async function keyFor(source: KeySource, kdf: Kdf, format: FileFormat): Promise<Buffer> {
   if (source.kind === 'raw' && kdf.name !== 'raw') throw new TocsinError('WRONG_KEY_OR_TAMPERED', 'This file is protected by a passphrase, not a raw key.');
   if (source.kind === 'passphrase' && kdf.name !== 'scrypt') throw new TocsinError('WRONG_KEY_OR_TAMPERED', 'This file is protected by a raw key, not a passphrase.');
   const salt = saltOf(kdf);
@@ -249,9 +297,41 @@ async function keyFor(source: KeySource, kdf: Kdf, format: FileFormat): Promise<
   }
 }
 
-function newKdf(source: KeySource, scryptParams: ScryptParams): Kdf {
+/** @internal A fresh key-derivation header (new random salt) for a key source. */
+export function newKdf(source: KeySource, scryptParams: ScryptParams): Kdf {
   const salt = randomSalt().toString('base64');
   return source.kind === 'raw' ? { name: 'raw', salt } : { name: 'scrypt', salt, ...scryptParams };
+}
+
+/** @internal A store file, read and fully verified. */
+export interface VerifiedFile {
+  readonly file: FileV1;
+  readonly data: StoreData;
+  readonly revision: number;
+  readonly plain: Map<string, string>;
+}
+
+/**
+ * @internal Parses, decrypts and verifies the text of a store file with a key derived afresh from `source`
+ * (every record authenticated, the index complete, the audit chain intact).
+ */
+export async function verifyStoreBuffer(buf: Buffer, source: KeySource): Promise<VerifiedFile> {
+  const file = parseFile(buf, STORE_FORMAT);
+  const key = await keyFor(source, file.kdf, STORE_FORMAT);
+  try {
+    return { file, ...decryptAll(file, key) };
+  } finally {
+    key.fill(0);
+  }
+}
+
+/** @internal Throws unless two data sets hold exactly the same records. */
+export function assertSameData(actual: StoreData, expected: StoreData, when: string): void {
+  const a = recordsOf(actual);
+  const e = recordsOf(expected);
+  if (a.size !== e.size || [...e].some(([id, text]) => a.get(id) !== text)) {
+    throw new TocsinError('WRONG_KEY_OR_TAMPERED', `Verification ${when} failed: the store content differs from what was written.`);
+  }
 }
 
 export function emptyData(now: string): StoreData {
