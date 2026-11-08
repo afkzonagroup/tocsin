@@ -33,18 +33,26 @@ All notable changes to this project are documented here. The format follows [Kee
 - A store file that is not valid JSON is reported as possibly truncated or
   damaged, with a pointer to restoring from a backup.
 
+## [0.1.2] - 2026-11-08
+
 ### Fixed
 
 - Web UI: every form was refused in real browsers. `Referrer-Policy: no-referrer` makes browsers send
   `Origin: null` on form posts, which the Origin check refuses. The UI now uses `same-origin` (still no
-  referrer to other sites), and a Chromium test logs in and submits forms.
+  referrer to other sites), and a Chromium test logs in and submits forms (#22).
+
+## [0.1.1] - 2026-11-08
 
 ### Fixed
 
-- Two processes recovering the same stale store lock could both enter it on
-  Linux, which reuses a deleted file's inode at once. Stale-lock recovery now
-  runs under a short `<store>.lock.recover` mutex, and a stale lock that is a
-  symlink is never recovered.
+- Lock files are released only by their owner on file systems that reuse inode numbers (Linux): the lock now carries a random token (#4).
+- Files are checked and read through one handle opened without following symlinks, so they cannot change between check and read (#15).
+- Two processes recovering the same stale lock could both enter it on Linux, which reuses a deleted file's inode at once. Stale-lock recovery now runs under a short `<store>.lock.recover` mutex, and a stale lock that is a symlink is never recovered (#19).
+
+### Changed
+
+- Dependabot groups minor and patch updates and ignores major versions (#14).
+- Release workflow skips versions already on npm.
 
 ## [0.1.0] - 2026-11-08
 

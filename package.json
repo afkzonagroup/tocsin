@@ -1,6 +1,6 @@
 {
   "name": "@afkzona/tocsin",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Self-hosted, offline-first NIS2 significant-incident reporting: register, Article 23 deadlines, report content, encrypted local store.",
   "license": "AGPL-3.0-only",
   "author": "MB AFKzona Group <info@afkzonagroup.lt>",

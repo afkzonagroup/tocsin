@@ -27,4 +27,7 @@ jobs:
       # Ubuntu 23.10+ restricts unprivileged user namespaces, which the Chromium sandbox needs.
       - run: if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - run: npm run check
+      - run: npm run build
+      - run: npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+      - run: node scripts/check-pack.mjs "$RUNNER_TEMP/pack.json"
       - run: npm audit --omit=dev --audit-level=low

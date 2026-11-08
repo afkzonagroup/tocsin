@@ -11,7 +11,7 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['eslint.config.js', 'bin/tocsin.js'] },
+        projectService: { allowDefaultProject: ['eslint.config.js', 'bin/tocsin.js', 'scripts/check-pack.mjs'] },
         tsconfigRootDir: import.meta.dirname,
       },
     },

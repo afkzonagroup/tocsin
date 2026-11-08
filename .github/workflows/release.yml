@@ -31,4 +31,14 @@ jobs:
       - run: if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=low
-      - run: npm publish --provenance --access public
+      - run: npm run build
+      - run: npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+      - run: node scripts/check-pack.mjs "$RUNNER_TEMP/pack.json"
+      - name: Skip if this version is already on npm
+        id: published
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version > /dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.published.outputs.skip != 'true'
+        run: npm publish --provenance --access public
