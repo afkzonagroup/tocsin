@@ -375,7 +375,7 @@ describe('atomic and safe file writes', () => {
 
   it('two writers recovering the same stale lock never both get it', async () => {
     const t = join(dir, 'store');
-    for (let round = 0; round < 20; round++) {
+    for (let round = 0; round < 50; round++) {
       await writeFile(`${t}.lock`, JSON.stringify({ pid: 2 ** 22 + 12345, at: 'x' }));
       const old = new Date(Date.now() - 10 * 60_000);
       await utimes(`${t}.lock`, old, old);
@@ -393,6 +393,36 @@ describe('atomic and safe file writes', () => {
       expect(results.filter((r) => r.status === 'fulfilled').length).toBeGreaterThanOrEqual(1);
       expect((await readdir(dir)).filter((n) => n.includes('.lock'))).toEqual([]);
     }
+  });
+
+  it('only the holder of the recovery mutex may replace a stale lock', async () => {
+    const t = join(dir, 'store');
+    const stale = JSON.stringify({ pid: 2 ** 22 + 12345, at: 'x' });
+    await writeFile(`${t}.lock`, stale);
+    const old = new Date(Date.now() - 10 * 60_000);
+    await utimes(`${t}.lock`, old, old);
+    // Another process is recovering: we must leave the stale lock alone and report the store as locked.
+    await writeFile(`${t}.lock.recover`, '');
+    const err = await withLock(t, () => Promise.resolve('ok')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TocsinError);
+    expect((err as TocsinError).code).toBe('STORE_LOCKED');
+    expect((err as TocsinError).message).toContain('store.lock.recover');
+    expect(await readFile(`${t}.lock`, 'utf8')).toBe(stale);
+    // Once the mutex is gone, recovery succeeds and leaves neither file behind.
+    await unlinkFile(`${t}.lock.recover`);
+    expect(await withLock(t, () => Promise.resolve('ok'))).toBe('ok');
+    expect((await readdir(dir)).filter((n) => n.includes('.lock'))).toEqual([]);
+  });
+
+  it('a stale lock that is a symlink is never recovered', async () => {
+    const t = join(dir, 'store');
+    const victim = join(dir, 'victim');
+    await writeFile(victim, JSON.stringify({ pid: 2 ** 22 + 12345, at: 'x' }));
+    const old = new Date(Date.now() - 10 * 60_000);
+    await utimes(victim, old, old);
+    await symlink(victim, `${t}.lock`);
+    await expect(withLock(t, () => Promise.resolve('ok'))).rejects.toMatchObject({ code: 'STORE_LOCKED' });
+    expect(await readFile(victim, 'utf8')).toContain('4206649');
   });
 
   it('a writer whose lock was taken over does not delete the new owner\'s lock', async () => {
