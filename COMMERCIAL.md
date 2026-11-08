@@ -19,7 +19,7 @@ Some organisations cannot accept these obligations, for example because they emb
 - **White-label**: remove or replace the attribution in the interface and in reports.
 - **Warranty and indemnity options**, which the open-source licence excludes.
 - **Priority support** with agreed response times.
-- **Enterprise features** that are not part of the open repository: hosted dashboard, continuous multi-site monitoring, SSO/SAML, roles, audit evidence packs, a legal-update feed and SLA support.
+- **Services:** integration into your systems, custom connectors and features, and support agreements, quoted per project.
 
 Contact: **info@afkzonagroup.lt**
 
