@@ -49,7 +49,7 @@ Supported versions: the latest minor release.
 - **Login link**: `tocsin ui` prints a one-time login link on standard error. Anyone who reads it before you use it (for example in `docker logs`) can log in once. Use it promptly; restart the UI to get a new one.
 - **Debug output**: `TOCSIN_DEBUG=1` prints stack traces of unexpected errors to the local terminal. The web UI never shows them.
 - **Plain HTTP UI**: the UI uses plain HTTP on loopback. If you expose it beyond the machine (for example in a container), put it behind TLS and an authenticating proxy, and pass the proxy host with `--allowed-host`.
-- **Lock files**: a crashed process can leave `<store>.lock`. Tocsin removes it after two minutes when the recorded process no longer exists; otherwise delete it by hand.
+- **Lock files**: a crashed process can leave `<store>.lock`. Tocsin removes it after two minutes when the recorded process no longer exists; otherwise delete it by hand. A writer releases the lock only after checking, through one handle opened without following symlinks, that the file still has its inode and its random token. The final removal is by path (POSIX has no unlink-by-handle), so a process that replaces the lock file in the instant between that check and the removal could still lose its lock; this needs a local process with write access to the store directory, which can already modify the store.
 - **Time**: deadlines depend on a correct system clock and on the IANA time-zone data in your Node.js runtime.
 
 ## Data flows
