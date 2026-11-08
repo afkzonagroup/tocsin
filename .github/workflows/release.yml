@@ -26,6 +26,9 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci --ignore-scripts
+      - run: node node_modules/playwright-core/cli.js install --with-deps chromium-headless-shell
+      # Ubuntu 23.10+ restricts unprivileged user namespaces, which the Chromium sandbox needs.
+      - run: if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=low
       - run: npm publish --provenance --access public

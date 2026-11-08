@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Web UI: every form was refused in real browsers. `Referrer-Policy: no-referrer` makes browsers send
+  `Origin: null` on form posts, which the Origin check refuses. The UI now uses `same-origin` (still no
+  referrer to other sites), and a Chromium test logs in and submits forms.
+
+### Fixed
+
 - Two processes recovering the same stale store lock could both enter it on
   Linux, which reuses a deleted file's inode at once. Stale-lock recovery now
   runs under a short `<store>.lock.recover` mutex, and a stale lock that is a
