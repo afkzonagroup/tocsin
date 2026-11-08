@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { importTimestamp, MAX_IMPORT_BYTES, parseImport } from '../src/connectors/importers.js';
 import { planNotifications, plainForChat } from '../src/connectors/notify.js';
 import { isBlockedAddress, resolveSafeTarget } from '../src/connectors/ssrf.js';
-import { escapeSlack, nodeTransport, sendWebhook, signBody, slackBody, teamsBody, verifySignature, type TransportRequest, type WebhookMessage } from '../src/connectors/webhook.js';
+import { deliverWebhook, escapeSlack, nodeTransport, sendWebhook, signBody, slackBody, teamsBody, verifySignature, type TransportRequest, type WebhookMessage } from '../src/connectors/webhook.js';
 import type { TocsinConfig, WebhookConfig } from '../src/model/config.js';
 import { validateConfig } from '../src/model/config.js';
 import { emptyData } from '../src/store/store.js';
@@ -144,6 +144,56 @@ describe('webhook payloads and signing', () => {
     await expect(sendWebhook(generic, msg, env, opts(302))).rejects.toThrow(/redirect/u);
     await expect(sendWebhook(generic, msg, env, opts(500))).rejects.toThrow(/HTTP 500/u);
     await expect(sendWebhook(generic, msg, { ...env, HOOK_URL: 'https://10.0.0.1/x' }, opts(200))).rejects.toThrow(/private/u);
+  });
+
+  describe('delivery with retries', () => {
+    const env = { HOOK_URL: 'https://hooks.example.com/in', HOOK_SECRET: 'k'.repeat(32) };
+    const run = (statuses: (number | 'timeout')[], attempts?: number) => {
+      const seen: TransportRequest[] = [];
+      const delays: number[] = [];
+      const queue = [...statuses];
+      const p = deliverWebhook(generic, msg, env, {
+        resolver: publicResolver('93.184.216.34'),
+        ...(attempts === undefined ? {} : { attempts }),
+        sleep: (ms) => {
+          delays.push(ms);
+          return Promise.resolve();
+        },
+        random: () => 0.5,
+        transport: (r) => {
+          seen.push(r);
+          const next = queue.shift() ?? 200;
+          if (next === 'timeout') return Promise.reject(new TocsinError('NETWORK', 'Webhook request failed (timeout).', { retryable: true }));
+          return Promise.resolve({ status: next });
+        },
+      });
+      return { p, seen, delays };
+    };
+
+    it('retries 5xx, 429 and timeouts with growing delays and one delivery id', async () => {
+      const r = run([503, 'timeout', 204]);
+      await expect(r.p).resolves.toEqual({ attempts: 3 });
+      expect(r.delays).toEqual([750, 1500]);
+      const ids = new Set(r.seen.map((x) => x.headers['x-tocsin-delivery']));
+      expect(ids.size).toBe(1);
+    });
+
+    it('does not retry other client errors, redirects or blocked destinations', async () => {
+      const r400 = run([400]);
+      await expect(r400.p).rejects.toThrow(/HTTP 400/u);
+      expect(r400.seen).toHaveLength(1);
+      const r302 = run([302]);
+      await expect(r302.p).rejects.toThrow(/redirect/u);
+      expect(r302.seen).toHaveLength(1);
+      await expect(deliverWebhook(generic, msg, { ...env, HOOK_URL: 'https://10.0.0.1/x' }, { sleep: () => Promise.resolve() })).rejects.toThrow(/private/u);
+    });
+
+    it('gives up after the configured number of attempts', async () => {
+      const r = run([500, 500, 500, 500], 2);
+      await expect(r.p).rejects.toThrow(/HTTP 500/u);
+      expect(r.seen).toHaveLength(2);
+      await expect(deliverWebhook(generic, msg, env, { attempts: 9 })).rejects.toThrow(/between 1 and 5/u);
+    });
   });
 
   describe('node transport against a local server', () => {

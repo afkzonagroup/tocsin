@@ -141,7 +141,7 @@ export const nodeTransport: Transport = (req) =>
     r.on('timeout', () => r.destroy(new Error('timeout')));
     r.on('error', (e) => {
       clearTimeout(timer);
-      reject(new TocsinError('NETWORK', `Webhook request failed (${e.message === 'timeout' ? 'timeout' : 'connection error'}).`));
+      reject(new TocsinError('NETWORK', `Webhook request failed (${e.message === 'timeout' ? 'timeout' : 'connection error'}).`, { retryable: true }));
     });
     r.on('close', () => { clearTimeout(timer); });
     r.end(req.body);
@@ -151,6 +151,13 @@ export interface SendOptions extends GuardOptions {
   readonly transport?: Transport;
   readonly timeoutMs?: number;
   readonly now?: () => number;
+  /** Delivery id sent with generic webhooks; kept the same across retries so receivers can deduplicate. */
+  readonly deliveryId?: string;
+}
+
+/** HTTP statuses after which the same request may succeed later. */
+function retryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
 function bodyFor(kind: WebhookKind, m: WebhookMessage, deliveryId: string): string {
@@ -172,7 +179,7 @@ export async function sendWebhook(cfg: WebhookConfig, m: WebhookMessage, env: Re
   const url = env[cfg.urlEnv];
   if (url === undefined || url === '') throw new TocsinError('CONFIG', `Environment variable ${cfg.urlEnv} (webhook "${cfg.id}") is not set.`);
   const target = await resolveSafeTarget(url, { ...opts, ...(cfg.allowedHosts === undefined ? {} : { allowedHosts: cfg.allowedHosts }) });
-  const deliveryId = randomUUID();
+  const deliveryId = opts.deliveryId ?? randomUUID();
   const body = bodyFor(cfg.kind, m, deliveryId);
   const headers: Record<string, string> = { 'content-type': 'application/json', 'user-agent': 'tocsin-webhook/1' };
   if (cfg.kind === 'generic') {
@@ -187,5 +194,45 @@ export async function sendWebhook(cfg: WebhookConfig, m: WebhookMessage, env: Re
   }
   const res = await (opts.transport ?? nodeTransport)({ target, headers, body, timeoutMs: opts.timeoutMs ?? 10_000, maxResponseBytes: 64 * 1024 });
   if (res.status >= 300 && res.status < 400) throw new TocsinError('NETWORK', `Webhook "${cfg.id}" answered with a redirect (${res.status}); redirects are not followed.`);
-  if (res.status < 200 || res.status >= 300) throw new TocsinError('NETWORK', `Webhook "${cfg.id}" answered with HTTP ${res.status}.`);
+  if (res.status < 200 || res.status >= 300) throw new TocsinError('NETWORK', `Webhook "${cfg.id}" answered with HTTP ${res.status}.`, { retryable: retryableStatus(res.status) });
+}
+
+export interface DeliverOptions extends SendOptions {
+  /** Attempts in total, 1 to 5 (default 3). */
+  readonly attempts?: number;
+  /** Delay before the first retry in milliseconds (default 1000); doubles each retry, with jitter. */
+  readonly baseDelayMs?: number;
+  /** Sleep function (injectable for tests). */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /** Random source in [0, 1) for jitter (injectable for tests). */
+  readonly random?: () => number;
+}
+
+/** Result of a delivery with retries. */
+export interface DeliveryResult {
+  readonly attempts: number;
+}
+
+/**
+ * Sends one message with bounded retries. Only retryable failures (network errors, timeouts, HTTP 408,
+ * 429 and 5xx) are retried; configuration errors, blocked destinations, redirects and other HTTP
+ * statuses fail at once. The same delivery id is used for every attempt.
+ */
+export async function deliverWebhook(cfg: WebhookConfig, m: WebhookMessage, env: Readonly<Record<string, string | undefined>>, opts: DeliverOptions = {}): Promise<DeliveryResult> {
+  const attempts = opts.attempts ?? 3;
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 5) throw new TocsinError('CONFIG', 'Webhook attempts must be between 1 and 5.');
+  const base = opts.baseDelayMs ?? 1000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const random = opts.random ?? Math.random;
+  const deliveryId = opts.deliveryId ?? randomUUID();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await sendWebhook(cfg, m, env, { ...opts, deliveryId });
+      return { attempts: attempt };
+    } catch (err) {
+      const retry = err instanceof TocsinError && err.retryable && attempt < attempts;
+      if (!retry) throw err;
+      await sleep(Math.round(base * 2 ** (attempt - 1) * (0.5 + random() * 0.5)));
+    }
+  }
 }
