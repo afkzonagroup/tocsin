@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-08
+
+### Fixed
+
+- Web UI: every form was refused in real browsers. `Referrer-Policy: no-referrer` makes browsers send
+  `Origin: null` on form posts, which the Origin check refuses. The UI now uses `same-origin` (still no
+  referrer to other sites), and a Chromium test logs in and submits forms (#22).
+
 ## [0.1.1] - 2026-11-08
 
 ### Fixed

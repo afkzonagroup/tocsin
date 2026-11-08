@@ -51,7 +51,9 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'content-security-policy': UI_CSP,
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
-  'referrer-policy': 'no-referrer',
+  // same-origin, not no-referrer: under no-referrer browsers send "Origin: null" on form posts, which the
+  // Origin check must refuse. Same-origin still sends no referrer to any other site.
+  'referrer-policy': 'same-origin',
   'cross-origin-opener-policy': 'same-origin',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',

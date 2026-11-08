@@ -1,6 +1,6 @@
 {
   "name": "@afkzona/tocsin",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Self-hosted, offline-first NIS2 significant-incident reporting: register, Article 23 deadlines, report content, encrypted local store.",
   "license": "AGPL-3.0-only",
   "author": "MB AFKzona Group <info@afkzonagroup.lt>",
@@ -68,6 +68,7 @@
     "@types/node": "22.20.5",
     "@vitest/coverage-v8": "5.1.0",
     "eslint": "10.14.0",
+    "playwright-core": "1.64.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
     "vitest": "5.1.0"
