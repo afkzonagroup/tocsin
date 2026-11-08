@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Two processes recovering the same stale store lock could both enter it on
+  Linux, which reuses a deleted file's inode at once. Stale-lock recovery now
+  runs under a short `<store>.lock.recover` mutex, and a stale lock that is a
+  symlink is never recovered.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added
