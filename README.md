@@ -22,6 +22,8 @@ It does **not** submit anything to authorities, does not know national portals o
 
 ## Quick start
 
+> **Before the first npm release:** `@afkzona/tocsin` is published to npm from v0.2.0 ([roadmap](https://github.com/afkzonagroup/tocsin/milestone/1)). Until then, build it from source: clone https://github.com/afkzonagroup/tocsin, run `npm ci && npm run build && npm pack`, and install the resulting `.tgz` file wherever the steps below install `@afkzona/tocsin`.
+
 Requires Node.js 22 or later.
 
 ```sh
