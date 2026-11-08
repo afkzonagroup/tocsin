@@ -1,11 +1,14 @@
 version: 2
 # Minor and patch updates arrive as one grouped pull request per ecosystem each week.
 # Major versions are upgraded deliberately, with their own issue, so they are ignored here.
+# New versions must be at least 7 days old before Dependabot proposes them (security updates are not delayed).
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     groups:
       npm-minor-and-patch:
@@ -20,6 +23,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     groups:
       github_actions-minor-and-patch:
@@ -34,6 +39,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     groups:
       docker-minor-and-patch:
