@@ -28,6 +28,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=low
+      - run: npm run build
+      - run: npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+      - run: node scripts/check-pack.mjs "$RUNNER_TEMP/pack.json"
       - name: Skip if this version is already on npm
         id: published
         run: |
