@@ -8,7 +8,7 @@ import { findRecurringIncidents } from '../assess/recurring.js';
 import { verifyAudit } from '../audit/chain.js';
 import { IMPORT_FORMATS, MAX_IMPORT_BYTES, parseImport, type ImportFormat } from '../connectors/importers.js';
 import { planNotifications } from '../connectors/notify.js';
-import { sendWebhook } from '../connectors/webhook.js';
+import { deliverWebhook } from '../connectors/webhook.js';
 import { formatRef } from '../legal/refs.js';
 import { validateConfig, type TocsinConfig } from '../model/config.js';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS, STAGES, STAGE_LABELS, type Incident, type ServiceType, type Stage } from '../model/types.js';
@@ -804,7 +804,7 @@ const commands: Readonly<Record<string, Handler>> = {
         const hook = (cfg.webhooks ?? []).find((h) => h.id === n.webhookId);
         if (hook === undefined) continue;
         try {
-          await sendWebhook(hook, n.message, io.env);
+          await deliverWebhook(hook, n.message, io.env);
           delivered.push(n.key);
         } catch (err) {
           failed++;
