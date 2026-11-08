@@ -84,7 +84,10 @@ Instead of the prompt you can set `TOCSIN_PASSPHRASE`, or `TOCSIN_KEY` with a ra
 | `submit <id> <stage> --at T [--ref X]` | Record a submission |
 | `recipients <id> --kind incident\|threat --at T --audience A --summary S` | Record a communication to recipients |
 | `audit [--verify]` | Audit log and chain check |
-| `export --out F`, `import --in F` | Encrypted export; restore into a new store |
+| `export --out F` | Encrypted export, also the backup format |
+| `import --in F [--replace]` | Restore an export; `--replace` replaces an existing store and keeps it as a `.bak` |
+| `rekey [--new-key-file F]` | Re-encrypt the store under a new key or passphrase |
+| `migrate` | Upgrade the store file to the current format version |
 | `import-incidents --format F --in F --service S` | Draft incidents from another tool |
 | `notify [--dry-run]` | Send due and overdue reminders |
 | `ui` | Local web interface |
@@ -94,6 +97,45 @@ Times: `now`, `2026-03-29T14:05` (your configured zone) or `2026-03-29T14:05+02:
 Stages: `early-warning`, `incident-notification`, `intermediate-report`, `progress-report`, `final-report`.
 
 Service types: `dns`, `tld-registry`, `cloud`, `data-centre`, `cdn`, `managed-service`, `managed-security-service`, `online-marketplace`, `online-search-engine`, `social-network`, `trust-service`, `other`.
+
+## Backup and restore
+
+A backup is an encrypted export. It is sealed under its own key, so you can keep the backup key apart from the store key.
+
+```sh
+export TOCSIN_EXPORT_KEY="$(cat /secure/backup.key)"     # or TOCSIN_EXPORT_PASSPHRASE, or the prompt
+tocsin export --out "backup-$(date -u +%Y%m%dT%H%M%SZ).tocsin-export"
+```
+
+Each export adds an `export.created` entry to the audit log, so the log shows when backups were taken. Copy the file off the machine.
+
+To restore into a new store, give a new `--store` path. To replace a store that is damaged or lost its key, add `--replace`:
+
+```sh
+tocsin import --in backup-20260110T080000Z.tocsin-export --replace
+```
+
+Before anything is replaced, Tocsin decrypts every record of the backup and checks its index and its audit chain. A backup that does not verify changes nothing. Without `--replace`, an existing store is never overwritten. With it, the current store file is kept byte for byte as `<store>.<UTC time>.bak` (mode 0600), even when it is damaged. The restored store gets a `store.restored` audit entry. It is encrypted under the store key you give (`TOCSIN_KEY`, `TOCSIN_PASSPHRASE`, `--key-file` or the prompt).
+
+Practise a restore now and then: restore the latest backup into a scratch path and run `tocsin audit --verify --store <scratch>` on it.
+
+If the store file is cut short (a full disk, a copy that stopped), Tocsin refuses to open it and says it may be truncated. Its own writes cannot cause this: every write goes to a temporary file, which is fsynced and then renamed over the store. A crash can leave a `.<store>.<random>.tmp` file next to the store. Tocsin never reads it; delete it.
+
+## Key rotation
+
+```sh
+TOCSIN_KEY=<current key> TOCSIN_NEW_KEY="$(openssl rand -hex 32)" tocsin rekey
+```
+
+The new secret comes from `--new-key-file` (a 0600 file), `TOCSIN_NEW_KEY`, `TOCSIN_NEW_PASSPHRASE`, or a prompt that asks twice. It is never taken from the command line and never printed. Any direction works: passphrase to passphrase, raw key to raw key, or between the two. A new passphrase needs at least 12 characters, and the same secret again is refused.
+
+`rekey` takes the store lock, verifies the whole store and its audit chain with the current secret, seals every record again under a new salt, verifies the result in memory, replaces the file atomically, and reads it back to verify it once more. The audit log keeps every entry and gains a `store.rekeyed` entry that names only the kind of secret. If the process stops at any point, the store opens with the old secret or with the new one, never neither: try both.
+
+Stop `tocsin ui` before rotating: a running interface holds the old key and refuses to write afterwards. Backups and exports made before the rotation still open with the keys they were made with; make a new backup and destroy old ones if the old key leaked.
+
+## Format upgrades
+
+Every store file records its format version. A Tocsin release that changes the format can still read the old one: run `tocsin migrate`. It takes the lock, verifies the store, converts it step by step, verifies the result completely, keeps the original as `<store>.v<old version>-<UTC time>.bak` and adds a `store.migrated` audit entry. On a current store it only verifies and changes nothing. Other commands refuse an old store and point to `tocsin migrate`. A store written by a newer Tocsin is refused, never rewritten; upgrade Tocsin instead.
 
 ## Web interface
 
@@ -197,7 +239,7 @@ const markdown = renderReport(buildReport(incident, 'early-warning', config, Dat
 console.log(markdown.startsWith('# Early warning: Storage cluster outage')); // true
 ```
 
-The package also exports the encrypted store (`EncryptedStore`), the register operations (`ops`), the audit chain, the web UI (`startUi`), the webhook sender and the importers. All public functions have TSDoc comments.
+The package also exports the encrypted store (`EncryptedStore`), store maintenance (`rekeyStore`, `restoreStore`, `migrateStore`), the register operations (`ops`), the audit chain, the web UI (`startUi`), the webhook sender and the importers. All public functions have TSDoc comments.
 
 ## Configuration
 
@@ -215,7 +257,7 @@ The package also exports the encrypted store (`EncryptedStore`), the register op
 | `turnover.financialYear`, `turnover.amountCents` | no | Preceding year's total annual turnover, for the 5 % test of IR Art 3(1)(a) |
 | `webhooks[]` | no | See "Webhooks" |
 
-Environment: `TOCSIN_STORE`, `TOCSIN_CONFIG`, `TOCSIN_KEY` or `TOCSIN_PASSPHRASE`, `TOCSIN_EXPORT_KEY` or `TOCSIN_EXPORT_PASSPHRASE`, `TOCSIN_ACTOR` (name in the audit log; default: OS user), `NO_COLOR`.
+Environment: `TOCSIN_STORE`, `TOCSIN_CONFIG`, `TOCSIN_KEY` or `TOCSIN_PASSPHRASE`, `TOCSIN_EXPORT_KEY` or `TOCSIN_EXPORT_PASSPHRASE`, `TOCSIN_NEW_KEY` or `TOCSIN_NEW_PASSPHRASE` (for `rekey`), `TOCSIN_ACTOR` (name in the audit log; default: OS user), `NO_COLOR`.
 
 ## Limitations
 
@@ -227,7 +269,7 @@ Environment: `TOCSIN_STORE`, `TOCSIN_CONFIG`, `TOCSIN_KEY` or `TOCSIN_PASSPHRASE
 
 ## Security
 
-Details and the threat model: [SECURITY.md](SECURITY.md). In short: AES-256-GCM per record with a sealed index, scrypt for passphrases, atomic 0600 writes, hash-chained audit log, loopback-only UI with one-time token, CSRF tokens and a strict CSP, SSRF-guarded webhooks, no telemetry. Report vulnerabilities through GitHub Security Advisories.
+Details and the threat model: [SECURITY.md](SECURITY.md). In short: AES-256-GCM per record with a sealed index, scrypt for passphrases, atomic 0600 writes, crash-safe key rotation and verified restores, hash-chained audit log, loopback-only UI with one-time token, CSRF tokens and a strict CSP, SSRF-guarded webhooks, no telemetry. Report vulnerabilities through GitHub Security Advisories.
 
 ## Dependencies
 

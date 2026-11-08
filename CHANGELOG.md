@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `tocsin rekey` re-encrypts the store under a new raw key or passphrase, in
+  any direction. The new secret comes from `--new-key-file`,
+  `TOCSIN_NEW_KEY`, `TOCSIN_NEW_PASSPHRASE` or the prompt, never from the
+  command line. The store and its audit chain are verified before and after,
+  the file is replaced atomically under the lock, and a `store.rekeyed` audit
+  entry records the change without key material. Interrupted at any point,
+  the store opens with the old or the new secret.
+- `tocsin import --replace` restores a backup over an existing store. The
+  backup is fully verified first; the replaced file is kept as
+  `<store>.<UTC time>.bak` (mode 0600) and a `store.restored` audit entry is
+  added. Without the flag an existing store is never overwritten.
+- `tocsin migrate` and a store format migration framework: ordered steps,
+  run under the lock, verified before and after, atomic, with a `.bak` of the
+  original and a `store.migrated` audit entry.
+- Library: `rekeyStore`, `restoreStore`, `migrateStore`, `planMigration`,
+  `STORE_MIGRATIONS`, `FORMAT_VERSION`.
+- Fault-injection tests: a crash at every file-system step of rekey, restore
+  and migrate, and a half-written file at every write.
+- README sections on backup and restore, key rotation and format upgrades.
+
+### Changed
+
+- A store or export written by a newer Tocsin is refused with a message that
+  names its format version; an older store points to `tocsin migrate`.
+- A store file that is not valid JSON is reported as possibly truncated or
+  damaged, with a pointer to restoring from a backup.
+
 ### Fixed
 
 - Web UI: every form was refused in real browsers. `Referrer-Policy: no-referrer` makes browsers send
