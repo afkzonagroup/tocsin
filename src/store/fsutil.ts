@@ -7,6 +7,9 @@ import { chmod, link, lstat, open, readFile, rename, stat, unlink } from 'node:f
 import { basename, dirname, join, resolve } from 'node:path';
 import { TocsinError } from '../util/errors.js';
 
+/** O_NONBLOCK so that opening a FIFO or device for the size check cannot hang. */
+const NONBLOCK = constants.O_NONBLOCK;
+
 /** Private file mode: owner read/write only. */
 export const PRIVATE_MODE = 0o600;
 
@@ -78,20 +81,27 @@ export async function writeNewFile(path: string, data: string | Uint8Array, mode
 
 /** Reads a regular file with a size cap. Refuses symlinks, so a planted link cannot redirect the read. */
 export async function readFileCapped(path: string, maxBytes: number): Promise<Buffer> {
-  let st;
+  // Open once without following symlinks, then check and read through the same handle, so the file
+  // cannot be swapped between the check and the read.
+  let fh;
   try {
-    st = await lstat(path);
+    fh = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | NONBLOCK);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') throw new TocsinError('NOT_FOUND', `${basename(path)} does not exist.`);
+    if (code === 'ELOOP' || code === 'EMLINK') throw new TocsinError('IO', `${basename(path)} is a symbolic link; refusing to follow it.`);
     throw new TocsinError('IO', `Could not read ${basename(path)}: ${code ?? 'I/O error'}.`);
   }
-  if (st.isSymbolicLink()) throw new TocsinError('IO', `${basename(path)} is a symbolic link; refusing to follow it.`);
-  if (!st.isFile()) throw new TocsinError('IO', `${basename(path)} is not a regular file.`);
-  if (st.size > maxBytes) throw new TocsinError('IO', `${basename(path)} is larger than ${Math.floor(maxBytes / 1024 / 1024)} MiB.`);
-  const buf = await readFile(path);
-  if (buf.length > maxBytes) throw new TocsinError('IO', `${basename(path)} is too large.`);
-  return buf;
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) throw new TocsinError('IO', `${basename(path)} is not a regular file.`);
+    if (st.size > maxBytes) throw new TocsinError('IO', `${basename(path)} is larger than ${Math.floor(maxBytes / 1024 / 1024)} MiB.`);
+    const buf = await fh.readFile();
+    if (buf.length > maxBytes) throw new TocsinError('IO', `${basename(path)} is too large.`);
+    return buf;
+  } finally {
+    await fh.close().catch(() => undefined);
+  }
 }
 
 export async function exists(path: string): Promise<boolean> {
@@ -141,11 +151,24 @@ export async function withLock<T>(target: string, fn: () => Promise<T>): Promise
   } finally {
     await fh.close().catch(() => undefined);
     // Remove the lock only if it is still the file we created: same inode and still carrying our token.
-    const now = await lstat(lockPath).catch(() => undefined);
-    if (now !== undefined && now.dev === ours?.dev && now.ino === ours.ino) {
-      const content = await readFile(lockPath, 'utf8').catch(() => '');
-      if (content.includes(`"token":"${token}"`)) await unlink(lockPath).catch(() => undefined);
-    }
+    // Inode and token are read through one handle opened without following symlinks.
+    if (await isOurLock(lockPath, ours, token)) await unlink(lockPath).catch(() => undefined);
+  }
+}
+
+async function isOurLock(lockPath: string, ours: { dev: number; ino: number } | undefined, token: string): Promise<boolean> {
+  if (ours === undefined) return false;
+  const fh = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined);
+  if (fh === undefined) return false;
+  try {
+    const st = await fh.stat();
+    if (st.dev !== ours.dev || st.ino !== ours.ino) return false;
+    const content = (await fh.readFile({ encoding: 'utf8' })).slice(0, 4096);
+    return content.includes(`"token":"${token}"`);
+  } catch {
+    return false;
+  } finally {
+    await fh.close().catch(() => undefined);
   }
 }
 
