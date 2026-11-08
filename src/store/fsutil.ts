@@ -3,7 +3,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, link, lstat, open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import { chmod, lstat, open, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { TocsinError } from '../util/errors.js';
 
@@ -124,21 +124,20 @@ const LOCK_STALE_MS = 2 * 60_000;
 
 /**
  * Exclusive advisory lock next to the store (`<store>.lock`). Held only for one read-modify-write.
- * A lock older than two minutes whose process no longer exists is treated as stale and removed.
+ * A lock older than two minutes whose process no longer exists is treated as stale and replaced.
  */
 export async function withLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
   const lockPath = `${target}.lock`;
-  let fh;
-  for (let attempt = 0; attempt < 2 && fh === undefined; attempt++) {
-    try {
-      fh = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, PRIVATE_MODE);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw new TocsinError('IO', 'Could not create the lock file.', { cause: err });
-      if (attempt === 0 && (await removeIfStale(lockPath))) continue;
-      throw new TocsinError('STORE_LOCKED', `The store is locked by another process (${basename(lockPath)}). If no other Tocsin process is running, delete that file.`);
-    }
+  let fh: FileHandle | undefined;
+  try {
+    fh = await open(lockPath, LOCK_FLAGS, PRIVATE_MODE);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw new TocsinError('IO', 'Could not create the lock file.', { cause: err });
+    fh = await takeOverStaleLock(lockPath);
   }
-  if (fh === undefined) throw new TocsinError('STORE_LOCKED', 'The store is locked by another process.');
+  if (fh === undefined) {
+    throw new TocsinError('STORE_LOCKED', `The store is locked by another process (${basename(lockPath)}). If no other Tocsin process is running, delete that file and any ${basename(lockPath)}.recover next to it.`);
+  }
   let ours: { dev: number; ino: number } | undefined;
   // A random token identifies our lock. Inode numbers alone are not enough: Linux file systems reuse the
   // inode of a deleted file at once, so a replacement lock can carry the same dev/ino as ours.
@@ -156,6 +155,8 @@ export async function withLock<T>(target: string, fn: () => Promise<T>): Promise
   }
 }
 
+const LOCK_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL;
+
 async function isOurLock(lockPath: string, ours: { dev: number; ino: number } | undefined, token: string): Promise<boolean> {
   if (ours === undefined) return false;
   const fh = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined);
@@ -172,33 +173,64 @@ async function isOurLock(lockPath: string, ours: { dev: number; ino: number } | 
   }
 }
 
-async function removeIfStale(lockPath: string): Promise<boolean> {
+/**
+ * Replace a stale lock with our own. Only the process holding `<lock>.recover` (created with O_EXCL) may
+ * judge the lock stale, remove it and create its own, so two processes recovering the same stale lock can
+ * never remove each other's fresh lock. (An earlier design moved the stale file aside and compared inode
+ * numbers, which Linux reuses at once.) Returns the new lock's handle, or undefined when the lock is live,
+ * another process is recovering it, or a new owner got there first.
+ */
+async function takeOverStaleLock(lockPath: string): Promise<FileHandle | undefined> {
+  const mutexPath = `${lockPath}.recover`;
+  let mutex: FileHandle;
   try {
-    const st = await lstat(lockPath);
-    if (Date.now() - st.mtimeMs < LOCK_STALE_MS) return false;
-    const info = JSON.parse((await readFile(lockPath, 'utf8')).slice(0, 200)) as { pid?: unknown };
-    if (typeof info.pid === 'number' && Number.isSafeInteger(info.pid) && info.pid > 0) {
+    mutex = await open(mutexPath, LOCK_FLAGS, PRIVATE_MODE);
+  } catch {
+    return undefined;
+  }
+  try {
+    if (!(await isStaleLock(lockPath))) return undefined;
+    // Under the mutex nobody else removes a stale lock, so the file judged stale is the one removed.
+    await unlink(lockPath).catch((e: unknown) => {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    });
+    // A process that was not recovering may create the lock in between; then it owns it and we back off.
+    return await open(lockPath, LOCK_FLAGS, PRIVATE_MODE);
+  } catch {
+    return undefined;
+  } finally {
+    await mutex.close().catch(() => undefined);
+    await unlink(mutexPath).catch(() => undefined);
+  }
+}
+
+/** A lock is stale when it is a regular file older than two minutes whose process no longer exists. */
+async function isStaleLock(lockPath: string): Promise<boolean> {
+  const fh = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW | NONBLOCK).catch(() => undefined);
+  if (fh === undefined) return false;
+  try {
+    const st = await fh.stat();
+    if (!st.isFile() || Date.now() - st.mtimeMs < LOCK_STALE_MS) return false;
+    const buf = Buffer.alloc(200);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    let pid: unknown;
+    try {
+      pid = (JSON.parse(buf.subarray(0, bytesRead).toString('utf8')) as { pid?: unknown }).pid;
+    } catch {
+      pid = undefined; // unreadable content in an old lock: no process to protect
+    }
+    if (typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0) {
       try {
-        process.kill(info.pid, 0);
+        process.kill(pid, 0);
         return false; // process still alive
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'ESRCH') return false;
       }
     }
-    // Move the stale lock aside atomically: when several processes recover it at once, only one rename
-    // succeeds. If the file moved is not the one judged stale (a fresh lock replaced it in between),
-    // put it back and give up.
-    const aside = `${lockPath}.${randomBytes(6).toString('hex')}.stale`;
-    await rename(lockPath, aside);
-    const moved = await lstat(aside);
-    if (moved.dev !== st.dev || moved.ino !== st.ino) {
-      await link(aside, lockPath).catch(() => undefined);
-      await unlink(aside).catch(() => undefined);
-      return false;
-    }
-    await unlink(aside);
     return true;
   } catch {
     return false;
+  } finally {
+    await fh.close().catch(() => undefined);
   }
 }

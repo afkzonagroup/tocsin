@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Lock files are released only by their owner on file systems that reuse inode numbers (Linux): the lock now carries a random token (#4).
 - Files are checked and read through one handle opened without following symlinks, so they cannot change between check and read (#15).
+- Two processes recovering the same stale lock could both enter it on Linux, which reuses a deleted file's inode at once. Stale-lock recovery now runs under a short `<store>.lock.recover` mutex, and a stale lock that is a symlink is never recovered (#19).
 
 ### Changed
 
